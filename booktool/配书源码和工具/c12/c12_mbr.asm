@@ -10,7 +10,7 @@
       
          ;计算GDT所在的逻辑段地址
          mov eax,[cs:pgdt+0x7c00+0x02]      ;GDT的32位线性基地址 
-         xor edx,edx
+         xor edx,edx                        ; 先清理余数
          mov ebx,16
          div ebx                            ;分解成16位逻辑地址 
 
