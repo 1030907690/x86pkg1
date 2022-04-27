@@ -10,7 +10,3 @@ if __name__ == '__main__':
             os.system('nasm  '+file +' -o '+file_name_prefix+'.bin  -l '+file_name_prefix+'.lst')
     print('end')
     input('')
-
-    os.system('git add .')
-    os.system('git commit -m \'auto\'')
-    os.system('git push')
