@@ -9,8 +9,8 @@
          mov sp,0x7c00
       
          ;计算GDT所在的逻辑段地址 
-         mov ax,[cs:gdt_base+0x7c00]        ;低16位 
-         mov dx,[cs:gdt_base+0x7c00+0x02]   ;高16位 
+         mov ax,[cs:gdt_base+0x7c00]        ;低16位  -- 猜测读下面定义的数据
+         mov dx,[cs:gdt_base+0x7c00+0x02]   ;高16位  -- 猜测读下面定义的数据
          mov bx,16        
          div bx            
          mov ds,ax                          ;令DS指向该段以进行操作
