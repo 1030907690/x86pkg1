@@ -9,8 +9,8 @@
          mov sp,0x7c00
       
          ;计算GDT所在的逻辑段地址 
-         mov ax,[cs:gdt_base+0x7c00]        ;低16位  -- 猜测读下面定义的数据
-         mov dx,[cs:gdt_base+0x7c00+0x02]   ;高16位  -- 猜测读下面定义的数据
+         mov ax,[cs:gdt_base+0x7c00]        ;低16位  - 猜测读下面定义的gdt_base数据
+         mov dx,[cs:gdt_base+0x7c00+0x02]   ;高16位  - 猜测读下面定义的gdt_base数据
          mov bx,16        
          div bx            
          mov ds,ax                          ;令DS指向该段以进行操作
@@ -21,8 +21,8 @@
          mov dword [bx+0x04],0x00  
 
          ;创建#1描述符，保护模式下的代码段描述符
-         mov dword [bx+0x08],0x7c0001ff     
-         mov dword [bx+0x0c],0x00409800     
+         mov dword [bx+0x08],0x7c0001ff     ; - 低32位 01111100000000000000000111111111
+         mov dword [bx+0x0c],0x00409800     ; - 高32位 01000000100110000000000000000000
 
          ;创建#2描述符，保护模式下的数据段描述符（文本模式下的显示缓冲区） 
          mov dword [bx+0x10],0x8000ffff     
