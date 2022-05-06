@@ -1,0 +1,627 @@
+     1                                           ;代码清单13-2
+     2                                           ;文件名：c13_core.asm
+     3                                           ;文件说明：保护模式微型核心程序 
+     4                                           ;创建日期：2011-10-26 12:11
+     5                                  
+     6                                           ;以下常量定义部分。内核的大部分内容都应当固定 
+     7                                           core_code_seg_sel     equ  0x38    ;内核代码段选择子
+     8                                           core_data_seg_sel     equ  0x30    ;内核数据段选择子 
+     9                                           sys_routine_seg_sel   equ  0x28    ;系统公共例程代码段的选择子 
+    10                                           video_ram_seg_sel     equ  0x20    ;视频显示缓冲区的段选择子
+    11                                           core_stack_seg_sel    equ  0x18    ;内核堆栈段选择子
+    12                                           mem_0_4_gb_seg_sel    equ  0x08    ;整个0-4GB内存的段的选择子
+    13                                  
+    14                                  ;-------------------------------------------------------------------------------
+    15                                           ;以下是系统核心的头部，用于加载核心程序 
+    16 00000000 [00000000]                       core_length      dd core_end       ;核心程序总长度#00
+    17                                  
+    18 00000004 [00000000]                       sys_routine_seg  dd section.sys_routine.start
+    19                                                                              ;系统公用例程段位置#04
+    20                                  
+    21 00000008 [00000000]                       core_data_seg    dd section.core_data.start
+    22                                                                              ;核心数据段位置#08
+    23                                  
+    24 0000000C [00000000]                       core_code_seg    dd section.core_code.start
+    25                                                                              ;核心代码段位置#0c
+    26                                  
+    27                                  
+    28 00000010 [5D010000]                       core_entry       dd start          ;核心代码段入口点#10
+    29 00000014 3800                                              dw core_code_seg_sel
+    30                                  
+    31                                  ;===============================================================================
+    32                                           [bits 32]
+    33                                  ;===============================================================================
+    34                                  SECTION sys_routine vstart=0                ;系统公共例程代码段 
+    35                                  ;-------------------------------------------------------------------------------
+    36                                           ;字符串显示例程
+    37                                  put_string:                                 ;显示0终止的字符串并移动光标 
+    38                                                                              ;输入：DS:EBX=串地址
+    39 00000000 51                               push ecx
+    40                                    .getc:
+    41 00000001 8A0B                             mov cl,[ebx]
+    42 00000003 08C9                             or cl,cl
+    43 00000005 7408                             jz .exit
+    44 00000007 E805000000                       call put_char
+    45 0000000C 43                               inc ebx
+    46 0000000D EBF2                             jmp .getc
+    47                                  
+    48                                    .exit:
+    49 0000000F 59                               pop ecx
+    50 00000010 CB                               retf                               ;段间返回
+    51                                  
+    52                                  ;-------------------------------------------------------------------------------
+    53                                  put_char:                                   ;在当前光标处显示一个字符,并推进
+    54                                                                              ;光标。仅用于段内调用 
+    55                                                                              ;输入：CL=字符ASCII码 
+    56 00000011 60                               pushad
+    57                                  
+    58                                           ;以下取当前光标位置
+    59 00000012 66BAD403                         mov dx,0x3d4
+    60 00000016 B00E                             mov al,0x0e
+    61 00000018 EE                               out dx,al
+    62 00000019 6642                             inc dx                             ;0x3d5
+    63 0000001B EC                               in al,dx                           ;高字
+    64 0000001C 88C4                             mov ah,al
+    65                                  
+    66 0000001E 664A                             dec dx                             ;0x3d4
+    67 00000020 B00F                             mov al,0x0f
+    68 00000022 EE                               out dx,al
+    69 00000023 6642                             inc dx                             ;0x3d5
+    70 00000025 EC                               in al,dx                           ;低字
+    71 00000026 6689C3                           mov bx,ax                          ;BX=代表光标位置的16位数
+    72                                  
+    73 00000029 80F90D                           cmp cl,0x0d                        ;回车符？
+    74 0000002C 750E                             jnz .put_0a
+    75 0000002E 6689D8                           mov ax,bx
+    76 00000031 B350                             mov bl,80
+    77 00000033 F6F3                             div bl
+    78 00000035 F6E3                             mul bl
+    79 00000037 6689C3                           mov bx,ax
+    80 0000003A EB60                             jmp .set_cursor
+    81                                  
+    82                                    .put_0a:
+    83 0000003C 80F90A                           cmp cl,0x0a                        ;换行符？
+    84 0000003F 7506                             jnz .put_other
+    85 00000041 6683C350                         add bx,80
+    86 00000045 EB15                             jmp .roll_screen
+    87                                  
+    88                                    .put_other:                               ;正常显示字符
+    89 00000047 06                               push es
+    90 00000048 B820000000                       mov eax,video_ram_seg_sel          ;0xb8000段的选择子
+    91 0000004D 8EC0                             mov es,eax
+    92 0000004F 66D1E3                           shl bx,1
+    93 00000052 2667880F                         mov [es:bx],cl
+    94 00000056 07                               pop es
+    95                                  
+    96                                           ;以下将光标位置推进一个字符
+    97 00000057 66D1EB                           shr bx,1
+    98 0000005A 6643                             inc bx
+    99                                  
+   100                                    .roll_screen:
+   101 0000005C 6681FBD007                       cmp bx,2000                        ;光标超出屏幕？滚屏
+   102 00000061 7C39                             jl .set_cursor
+   103                                  
+   104 00000063 1E                               push ds
+   105 00000064 06                               push es
+   106 00000065 B820000000                       mov eax,video_ram_seg_sel
+   107 0000006A 8ED8                             mov ds,eax
+   108 0000006C 8EC0                             mov es,eax
+   109 0000006E FC                               cld
+   110 0000006F BEA0000000                       mov esi,0xa0                       ;小心！32位模式下movsb/w/d 
+   111 00000074 BF00000000                       mov edi,0x00                       ;使用的是esi/edi/ecx 
+   112 00000079 B980070000                       mov ecx,1920
+   113 0000007E F3A5                             rep movsd
+   114 00000080 66BB000F                         mov bx,3840                        ;清除屏幕最底一行
+   115 00000084 B950000000                       mov ecx,80                         ;32位程序应该使用ECX
+   116                                    .cls:
+   117 00000089 266667C7072007                   mov word[es:bx],0x0720
+   118 00000090 6683C302                         add bx,2
+   119 00000094 E2F3                             loop .cls
+   120                                  
+   121 00000096 07                               pop es
+   122 00000097 1F                               pop ds
+   123                                  
+   124 00000098 66BB8007                         mov bx,1920
+   125                                  
+   126                                    .set_cursor:
+   127 0000009C 66BAD403                         mov dx,0x3d4
+   128 000000A0 B00E                             mov al,0x0e
+   129 000000A2 EE                               out dx,al
+   130 000000A3 6642                             inc dx                             ;0x3d5
+   131 000000A5 88F8                             mov al,bh
+   132 000000A7 EE                               out dx,al
+   133 000000A8 664A                             dec dx                             ;0x3d4
+   134 000000AA B00F                             mov al,0x0f
+   135 000000AC EE                               out dx,al
+   136 000000AD 6642                             inc dx                             ;0x3d5
+   137 000000AF 88D8                             mov al,bl
+   138 000000B1 EE                               out dx,al
+   139                                  
+   140 000000B2 61                               popad
+   141 000000B3 C3                               ret                                
+   142                                  
+   143                                  ;-------------------------------------------------------------------------------
+   144                                  read_hard_disk_0:                           ;从硬盘读取一个逻辑扇区
+   145                                                                              ;EAX=逻辑扇区号
+   146                                                                              ;DS:EBX=目标缓冲区地址
+   147                                                                              ;返回：EBX=EBX+512
+   148 000000B4 50                               push eax 
+   149 000000B5 51                               push ecx
+   150 000000B6 52                               push edx
+   151                                        
+   152 000000B7 50                               push eax
+   153                                           
+   154 000000B8 66BAF201                         mov dx,0x1f2
+   155 000000BC B001                             mov al,1
+   156 000000BE EE                               out dx,al                          ;读取的扇区数
+   157                                  
+   158 000000BF 6642                             inc dx                             ;0x1f3
+   159 000000C1 58                               pop eax
+   160 000000C2 EE                               out dx,al                          ;LBA地址7~0
+   161                                  
+   162 000000C3 6642                             inc dx                             ;0x1f4
+   163 000000C5 B108                             mov cl,8
+   164 000000C7 D3E8                             shr eax,cl
+   165 000000C9 EE                               out dx,al                          ;LBA地址15~8
+   166                                  
+   167 000000CA 6642                             inc dx                             ;0x1f5
+   168 000000CC D3E8                             shr eax,cl
+   169 000000CE EE                               out dx,al                          ;LBA地址23~16
+   170                                  
+   171 000000CF 6642                             inc dx                             ;0x1f6
+   172 000000D1 D3E8                             shr eax,cl
+   173 000000D3 0CE0                             or al,0xe0                         ;第一硬盘  LBA地址27~24
+   174 000000D5 EE                               out dx,al
+   175                                  
+   176 000000D6 6642                             inc dx                             ;0x1f7
+   177 000000D8 B020                             mov al,0x20                        ;读命令
+   178 000000DA EE                               out dx,al
+   179                                  
+   180                                    .waits:
+   181 000000DB EC                               in al,dx
+   182 000000DC 2488                             and al,0x88
+   183 000000DE 3C08                             cmp al,0x08
+   184 000000E0 75F9                             jnz .waits                         ;不忙，且硬盘已准备好数据传输 
+   185                                  
+   186 000000E2 B900010000                       mov ecx,256                        ;总共要读取的字数
+   187 000000E7 66BAF001                         mov dx,0x1f0
+   188                                    .readw:
+   189 000000EB 66ED                             in ax,dx
+   190 000000ED 668903                           mov [ebx],ax
+   191 000000F0 83C302                           add ebx,2
+   192 000000F3 E2F6                             loop .readw
+   193                                  
+   194 000000F5 5A                               pop edx
+   195 000000F6 59                               pop ecx
+   196 000000F7 58                               pop eax
+   197                                        
+   198 000000F8 CB                               retf                               ;段间返回 
+   199                                  
+   200                                  ;-------------------------------------------------------------------------------
+   201                                  ;汇编语言程序是极难一次成功，而且调试非常困难。这个例程可以提供帮助 
+   202                                  put_hex_dword:                              ;在当前光标处以十六进制形式显示
+   203                                                                              ;一个双字并推进光标 
+   204                                                                              ;输入：EDX=要转换并显示的数字
+   205                                                                              ;输出：无
+   206 000000F9 60                               pushad
+   207 000000FA 1E                               push ds
+   208                                        
+   209 000000FB 66B83000                         mov ax,core_data_seg_sel           ;切换到核心数据段 
+   210 000000FF 8ED8                             mov ds,ax
+   211                                        
+   212 00000101 BB[06050000]                     mov ebx,bin_hex                    ;指向核心数据段内的转换表
+   213 00000106 B908000000                       mov ecx,8
+   214                                    .xlt:    
+   215 0000010B C1C204                           rol edx,4
+   216 0000010E 89D0                             mov eax,edx
+   217 00000110 83E00F                           and eax,0x0000000f
+   218 00000113 D7                               xlat
+   219                                        
+   220 00000114 51                               push ecx
+   221 00000115 88C1                             mov cl,al                           
+   222 00000117 E8F5FEFFFF                       call put_char
+   223 0000011C 59                               pop ecx
+   224                                         
+   225 0000011D E2EC                             loop .xlt
+   226                                        
+   227 0000011F 1F                               pop ds
+   228 00000120 61                               popad
+   229 00000121 CB                               retf
+   230                                        
+   231                                  ;-------------------------------------------------------------------------------
+   232                                  allocate_memory:                            ;分配内存
+   233                                                                              ;输入：ECX=希望分配的字节数
+   234                                                                              ;输出：ECX=起始线性地址 
+   235 00000122 1E                               push ds
+   236 00000123 50                               push eax
+   237 00000124 53                               push ebx
+   238                                        
+   239 00000125 B830000000                       mov eax,core_data_seg_sel
+   240 0000012A 8ED8                             mov ds,eax
+   241                                        
+   242 0000012C A1[06000000]                     mov eax,[ram_alloc]
+   243 00000131 01C8                             add eax,ecx                        ;下一次分配时的起始地址
+   244                                        
+   245                                           ;这里应当有检测可用内存数量的指令
+   246                                            
+   247 00000133 8B0D[06000000]                   mov ecx,[ram_alloc]                ;返回分配的起始地址
+   248                                  
+   249 00000139 89C3                             mov ebx,eax
+   250 0000013B 83E3FC                           and ebx,0xfffffffc
+   251 0000013E 83C304                           add ebx,4                          ;强制对齐 
+   252 00000141 A903000000                       test eax,0x00000003                ;下次分配的起始地址最好是4字节对齐
+   253 00000146 0F45C3                           cmovnz eax,ebx                     ;如果没有对齐，则强制对齐 
+   254 00000149 A3[06000000]                     mov [ram_alloc],eax                ;下次从该地址分配内存
+   255                                                                              ;cmovcc指令可以避免控制转移 
+   256 0000014E 5B                               pop ebx
+   257 0000014F 58                               pop eax
+   258 00000150 1F                               pop ds
+   259                                  
+   260 00000151 CB                               retf
+   261                                  
+   262                                  ;-------------------------------------------------------------------------------
+   263                                  set_up_gdt_descriptor:                      ;在GDT内安装一个新的描述符
+   264                                                                              ;输入：EDX:EAX=描述符 
+   265                                                                              ;输出：CX=描述符的选择子
+   266 00000152 50                               push eax
+   267 00000153 53                               push ebx
+   268 00000154 52                               push edx
+   269                                        
+   270 00000155 1E                               push ds
+   271 00000156 06                               push es
+   272                                        
+   273 00000157 BB30000000                       mov ebx,core_data_seg_sel          ;切换到核心数据段
+   274 0000015C 8EDB                             mov ds,ebx
+   275                                  
+   276 0000015E 0F0105[00000000]                 sgdt [pgdt]                        ;以便开始处理GDT
+   277                                  
+   278 00000165 BB08000000                       mov ebx,mem_0_4_gb_seg_sel
+   279 0000016A 8EC3                             mov es,ebx
+   280                                  
+   281 0000016C 0FB71D[00000000]                 movzx ebx,word [pgdt]              ;GDT界限 
+   282 00000173 6643                             inc bx                             ;GDT总字节数，也是下一个描述符偏移 
+   283 00000175 031D[02000000]                   add ebx,[pgdt+2]                   ;下一个描述符的线性地址 
+   284                                        
+   285 0000017B 268903                           mov [es:ebx],eax
+   286 0000017E 26895304                         mov [es:ebx+4],edx
+   287                                        
+   288 00000182 668305[00000000]08               add word [pgdt],8                  ;增加一个描述符的大小   
+   289                                        
+   290 0000018A 0F0115[00000000]                 lgdt [pgdt]                        ;对GDT的更改生效 
+   291                                         
+   292 00000191 66A1[00000000]                   mov ax,[pgdt]                      ;得到GDT界限值
+   293 00000197 6631D2                           xor dx,dx
+   294 0000019A 66BB0800                         mov bx,8
+   295 0000019E 66F7F3                           div bx                             ;除以8，去掉余数
+   296 000001A1 6689C1                           mov cx,ax                          
+   297 000001A4 66C1E103                         shl cx,3                           ;将索引号移到正确位置 
+   298                                  
+   299 000001A8 07                               pop es
+   300 000001A9 1F                               pop ds
+   301                                  
+   302 000001AA 5A                               pop edx
+   303 000001AB 5B                               pop ebx
+   304 000001AC 58                               pop eax
+   305                                        
+   306 000001AD CB                               retf 
+   307                                  ;-------------------------------------------------------------------------------
+   308                                  make_seg_descriptor:                        ;构造存储器和系统的段描述符
+   309                                                                              ;输入：EAX=线性基地址
+   310                                                                              ;      EBX=段界限
+   311                                                                              ;      ECX=属性。各属性位都在原始
+   312                                                                              ;          位置，无关的位清零 
+   313                                                                              ;返回：EDX:EAX=描述符
+   314 000001AE 89C2                             mov edx,eax
+   315 000001B0 C1E010                           shl eax,16
+   316 000001B3 6609D8                           or ax,bx                           ;描述符前32位(EAX)构造完毕
+   317                                  
+   318 000001B6 81E20000FFFF                     and edx,0xffff0000                 ;清除基地址中无关的位
+   319 000001BC C1C208                           rol edx,8
+   320 000001BF 0FCA                             bswap edx                          ;装配基址的31~24和23~16  (80486+)
+   321                                  
+   322 000001C1 6631DB                           xor bx,bx
+   323 000001C4 09DA                             or edx,ebx                         ;装配段界限的高4位
+   324                                  
+   325 000001C6 09CA                             or edx,ecx                         ;装配属性
+   326                                  
+   327 000001C8 CB                               retf
+   328                                  
+   329                                  ;===============================================================================
+   330                                  SECTION core_data vstart=0                  ;系统核心的数据段
+   331                                  ;-------------------------------------------------------------------------------
+   332 00000000 0000                             pgdt             dw  0             ;用于设置和修改GDT 
+   333 00000002 00000000                                          dd  0
+   334                                  
+   335 00000006 00001000                         ram_alloc        dd  0x00100000    ;下次分配内存时的起始地址
+   336                                  
+   337                                           ;符号地址检索表
+   338                                           salt:
+   339 0000000A 405072696E74537472-              salt_1           db  '@PrintString'
+   339 00000013 696E67             
+   340 00000016 00<rep F4h>                                  times 256-($-salt_1) db 0
+   341 0000010A [00000000]                                        dd  put_string
+   342 0000010E 2800                                              dw  sys_routine_seg_sel
+   343                                  
+   344 00000110 40526561644469736B-              salt_2           db  '@ReadDiskData'
+   344 00000119 44617461           
+   345 0000011D 00<rep F3h>                                  times 256-($-salt_2) db 0
+   346 00000210 [B4000000]                                        dd  read_hard_disk_0
+   347 00000214 2800                                              dw  sys_routine_seg_sel
+   348                                  
+   349 00000216 405072696E7444776F-              salt_3           db  '@PrintDwordAsHexString'
+   349 0000021F 726441734865785374-
+   349 00000228 72696E67           
+   350 0000022C 00<rep EAh>                                  times 256-($-salt_3) db 0
+   351 00000316 [F9000000]                                        dd  put_hex_dword
+   352 0000031A 2800                                              dw  sys_routine_seg_sel
+   353                                  
+   354 0000031C 405465726D696E6174-              salt_4           db  '@TerminateProgram'
+   354 00000325 6550726F6772616D   
+   355 0000032D 00<rep EFh>                                  times 256-($-salt_4) db 0
+   356 0000041C [1E020000]                                        dd  return_point
+   357 00000420 3800                                              dw  core_code_seg_sel
+   358                                  
+   359                                           salt_item_len   equ $-salt_4
+   360                                           salt_items      equ ($-salt)/salt_item_len
+   361                                  
+   362 00000422 2020496620796F7520-              message_1        db  '  If you seen this message,that means we '
+   362 0000042B 7365656E2074686973-
+   362 00000434 206D6573736167652C-
+   362 0000043D 74686174206D65616E-
+   362 00000446 7320776520         
+   363 0000044B 617265206E6F772069-                               db  'are now in protect mode,and the system '
+   363 00000454 6E2070726F74656374-
+   363 0000045D 206D6F64652C616E64-
+   363 00000466 207468652073797374-
+   363 0000046F 656D20             
+   364 00000472 636F7265206973206C-                               db  'core is loaded,and the video display '
+   364 0000047B 6F616465642C616E64-
+   364 00000484 207468652076696465-
+   364 0000048D 6F20646973706C6179-
+   364 00000496 20                 
+   365 00000497 726F7574696E652077-                               db  'routine works perfectly.',0x0d,0x0a,0
+   365 000004A0 6F726B732070657266-
+   365 000004A9 6563746C792E0D0A00 
+   366                                  
+   367 000004B2 20204C6F6164696E67-              message_5        db  '  Loading user program...',0
+   367 000004BB 20757365722070726F-
+   367 000004C4 6772616D2E2E2E00   
+   368                                           
+   369 000004CC 446F6E652E0D0A00                 do_status        db  'Done.',0x0d,0x0a,0
+   370                                           
+   371 000004D4 0D0A0D0A0D0A                     message_6        db  0x0d,0x0a,0x0d,0x0a,0x0d,0x0a
+   372 000004DA 202055736572207072-                               db  '  User program terminated,control returned.',0
+   372 000004E3 6F6772616D20746572-
+   372 000004EC 6D696E617465642C63-
+   372 000004F5 6F6E74726F6C207265-
+   372 000004FE 7475726E65642E00   
+   373                                  
+   374 00000506 303132333435363738-              bin_hex          db '0123456789ABCDEF'
+   374 0000050F 39414243444546     
+   375                                                                              ;put_hex_dword子过程用的查找表 
+   376 00000516 00<rep 800h>                     core_buf   times 2048 db 0         ;内核用的缓冲区
+   377                                  
+   378 00000D16 00000000                         esp_pointer      dd 0              ;内核用来临时保存自己的栈指针     
+   379                                  
+   380 00000D1A 0D0A202000                       cpu_brnd0        db 0x0d,0x0a,'  ',0
+   381 00000D1F 00<rep 34h>                      cpu_brand  times 52 db 0
+   382 00000D53 0D0A0D0A00                       cpu_brnd1        db 0x0d,0x0a,0x0d,0x0a,0
+   383                                  
+   384                                  ;===============================================================================
+   385                                  SECTION core_code vstart=0
+   386                                  ;-------------------------------------------------------------------------------
+   387                                  load_relocate_program:                      ;加载并重定位用户程序
+   388                                                                              ;输入：ESI=起始逻辑扇区号
+   389                                                                              ;返回：AX=指向用户程序头部的选择子 
+   390 00000000 53                               push ebx
+   391 00000001 51                               push ecx
+   392 00000002 52                               push edx
+   393 00000003 56                               push esi
+   394 00000004 57                               push edi
+   395                                        
+   396 00000005 1E                               push ds
+   397 00000006 06                               push es
+   398                                        
+   399 00000007 B830000000                       mov eax,core_data_seg_sel
+   400 0000000C 8ED8                             mov ds,eax                         ;切换DS到内核数据段
+   401                                         
+   402 0000000E 89F0                             mov eax,esi                        ;读取程序头部数据 
+   403 00000010 BB[16050000]                     mov ebx,core_buf                        
+   404 00000015 9A[B4000000]2800                 call sys_routine_seg_sel:read_hard_disk_0
+   405                                  
+   406                                           ;以下判断整个程序有多大
+   407 0000001C A1[16050000]                     mov eax,[core_buf]                 ;程序尺寸
+   408 00000021 89C3                             mov ebx,eax
+   409 00000023 81E300FEFFFF                     and ebx,0xfffffe00                 ;使之512字节对齐（能被512整除的数， 
+   410 00000029 81C300020000                     add ebx,512                        ;低9位都为0 
+   411 0000002F A9FF010000                       test eax,0x000001ff                ;程序的大小正好是512的倍数吗? 
+   412 00000034 0F45C3                           cmovnz eax,ebx                     ;不是。使用凑整的结果 
+   413                                        
+   414 00000037 89C1                             mov ecx,eax                        ;实际需要申请的内存数量
+   415 00000039 9A[22010000]2800                 call sys_routine_seg_sel:allocate_memory
+   416 00000040 89CB                             mov ebx,ecx                        ;ebx -> 申请到的内存首地址
+   417 00000042 53                               push ebx                           ;保存该首地址 
+   418 00000043 31D2                             xor edx,edx
+   419 00000045 B900020000                       mov ecx,512
+   420 0000004A F7F1                             div ecx
+   421 0000004C 89C1                             mov ecx,eax                        ;总扇区数 
+   422                                        
+   423 0000004E B808000000                       mov eax,mem_0_4_gb_seg_sel         ;切换DS到0-4GB的段
+   424 00000053 8ED8                             mov ds,eax
+   425                                  
+   426 00000055 89F0                             mov eax,esi                        ;起始扇区号 
+   427                                    .b1:
+   428 00000057 9A[B4000000]2800                 call sys_routine_seg_sel:read_hard_disk_0
+   429 0000005E 40                               inc eax
+   430 0000005F E2F6                             loop .b1                           ;循环读，直到读完整个用户程序
+   431                                  
+   432                                           ;建立程序头部段描述符
+   433 00000061 5F                               pop edi                            ;恢复程序装载的首地址 
+   434 00000062 89F8                             mov eax,edi                        ;程序头部起始线性地址
+   435 00000064 8B5F04                           mov ebx,[edi+0x04]                 ;段长度
+   436 00000067 4B                               dec ebx                            ;段界限 
+   437 00000068 B900924000                       mov ecx,0x00409200                 ;字节粒度的数据段描述符
+   438 0000006D 9A[AE010000]2800                 call sys_routine_seg_sel:make_seg_descriptor
+   439 00000074 9A[52010000]2800                 call sys_routine_seg_sel:set_up_gdt_descriptor
+   440 0000007B 66894F04                         mov [edi+0x04],cx                   
+   441                                  
+   442                                           ;建立程序代码段描述符
+   443 0000007F 89F8                             mov eax,edi
+   444 00000081 034714                           add eax,[edi+0x14]                 ;代码起始线性地址
+   445 00000084 8B5F18                           mov ebx,[edi+0x18]                 ;段长度
+   446 00000087 4B                               dec ebx                            ;段界限
+   447 00000088 B900984000                       mov ecx,0x00409800                 ;字节粒度的代码段描述符
+   448 0000008D 9A[AE010000]2800                 call sys_routine_seg_sel:make_seg_descriptor
+   449 00000094 9A[52010000]2800                 call sys_routine_seg_sel:set_up_gdt_descriptor
+   450 0000009B 66894F14                         mov [edi+0x14],cx
+   451                                  
+   452                                           ;建立程序数据段描述符
+   453 0000009F 89F8                             mov eax,edi
+   454 000000A1 03471C                           add eax,[edi+0x1c]                 ;数据段起始线性地址
+   455 000000A4 8B5F20                           mov ebx,[edi+0x20]                 ;段长度
+   456 000000A7 4B                               dec ebx                            ;段界限
+   457 000000A8 B900924000                       mov ecx,0x00409200                 ;字节粒度的数据段描述符
+   458 000000AD 9A[AE010000]2800                 call sys_routine_seg_sel:make_seg_descriptor
+   459 000000B4 9A[52010000]2800                 call sys_routine_seg_sel:set_up_gdt_descriptor
+   460 000000BB 66894F1C                         mov [edi+0x1c],cx
+   461                                  
+   462                                           ;建立程序堆栈段描述符
+   463 000000BF 8B4F0C                           mov ecx,[edi+0x0c]                 ;4KB的倍率 
+   464 000000C2 BBFFFF0F00                       mov ebx,0x000fffff
+   465 000000C7 29CB                             sub ebx,ecx                        ;得到段界限
+   466 000000C9 B800100000                       mov eax,4096                        
+   467 000000CE F7670C                           mul dword [edi+0x0c]                         
+   468 000000D1 89C1                             mov ecx,eax                        ;准备为堆栈分配内存 
+   469 000000D3 9A[22010000]2800                 call sys_routine_seg_sel:allocate_memory
+   470 000000DA 01C8                             add eax,ecx                        ;得到堆栈的高端物理地址 
+   471 000000DC B90096C000                       mov ecx,0x00c09600                 ;4KB粒度的堆栈段描述符
+   472 000000E1 9A[AE010000]2800                 call sys_routine_seg_sel:make_seg_descriptor
+   473 000000E8 9A[52010000]2800                 call sys_routine_seg_sel:set_up_gdt_descriptor
+   474 000000EF 66894F08                         mov [edi+0x08],cx
+   475                                  
+   476                                           ;重定位SALT
+   477 000000F3 8B4704                           mov eax,[edi+0x04]
+   478 000000F6 8EC0                             mov es,eax                         ;es -> 用户程序头部 
+   479 000000F8 B830000000                       mov eax,core_data_seg_sel
+   480 000000FD 8ED8                             mov ds,eax
+   481                                        
+   482 000000FF FC                               cld
+   483                                  
+   484 00000100 268B0D24000000                   mov ecx,[es:0x24]                  ;用户程序的SALT条目数
+   485 00000107 BF28000000                       mov edi,0x28                       ;用户程序内的SALT位于头部内0x2c处
+   486                                    .b2: 
+   487 0000010C 51                               push ecx
+   488 0000010D 57                               push edi
+   489                                        
+   490 0000010E B904000000                       mov ecx,salt_items
+   491 00000113 BE[0A000000]                     mov esi,salt
+   492                                    .b3:
+   493 00000118 57                               push edi
+   494 00000119 56                               push esi
+   495 0000011A 51                               push ecx
+   496                                  
+   497 0000011B B940000000                       mov ecx,64                         ;检索表中，每条目的比较次数 
+   498 00000120 F3A7                             repe cmpsd                         ;每次比较4字节 
+   499 00000122 7515                             jnz .b4
+   500 00000124 8B06                             mov eax,[esi]                      ;若匹配，esi恰好指向其后的地址数据
+   501 00000126 26898700FFFFFF                   mov [es:edi-256],eax               ;将字符串改写成偏移地址 
+   502 0000012D 668B4604                         mov ax,[esi+4]
+   503 00000131 2666898704FFFFFF                 mov [es:edi-252],ax                ;以及段选择子 
+   504                                    .b4:
+   505                                        
+   506 00000139 59                               pop ecx
+   507 0000013A 5E                               pop esi
+   508 0000013B 81C606010000                     add esi,salt_item_len
+   509 00000141 5F                               pop edi                            ;从头比较 
+   510 00000142 E2D4                             loop .b3
+   511                                        
+   512 00000144 5F                               pop edi
+   513 00000145 81C700010000                     add edi,256
+   514 0000014B 59                               pop ecx
+   515 0000014C E2BE                             loop .b2
+   516                                  
+   517 0000014E 2666A104000000                   mov ax,[es:0x04]
+   518                                  
+   519 00000155 07                               pop es                             ;恢复到调用此过程前的es段 
+   520 00000156 1F                               pop ds                             ;恢复到调用此过程前的ds段
+   521                                        
+   522 00000157 5F                               pop edi
+   523 00000158 5E                               pop esi
+   524 00000159 5A                               pop edx
+   525 0000015A 59                               pop ecx
+   526 0000015B 5B                               pop ebx
+   527                                        
+   528 0000015C C3                               ret
+   529                                        
+   530                                  ;-------------------------------------------------------------------------------
+   531                                  start:
+   532 0000015D B930000000                       mov ecx,core_data_seg_sel           ;使ds指向核心数据段 
+   533 00000162 8ED9                             mov ds,ecx
+   534                                  
+   535 00000164 BB[22040000]                     mov ebx,message_1
+   536 00000169 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   537                                                                           
+   538                                           ;显示处理器品牌信息 
+   539 00000170 B802000080                       mov eax,0x80000002
+   540 00000175 0FA2                             cpuid
+   541 00000177 A3[1F0D0000]                     mov [cpu_brand + 0x00],eax
+   542 0000017C 891D[230D0000]                   mov [cpu_brand + 0x04],ebx
+   543 00000182 890D[270D0000]                   mov [cpu_brand + 0x08],ecx
+   544 00000188 8915[2B0D0000]                   mov [cpu_brand + 0x0c],edx
+   545                                        
+   546 0000018E B803000080                       mov eax,0x80000003
+   547 00000193 0FA2                             cpuid
+   548 00000195 A3[2F0D0000]                     mov [cpu_brand + 0x10],eax
+   549 0000019A 891D[330D0000]                   mov [cpu_brand + 0x14],ebx
+   550 000001A0 890D[370D0000]                   mov [cpu_brand + 0x18],ecx
+   551 000001A6 8915[3B0D0000]                   mov [cpu_brand + 0x1c],edx
+   552                                  
+   553 000001AC B804000080                       mov eax,0x80000004
+   554 000001B1 0FA2                             cpuid
+   555 000001B3 A3[3F0D0000]                     mov [cpu_brand + 0x20],eax
+   556 000001B8 891D[430D0000]                   mov [cpu_brand + 0x24],ebx
+   557 000001BE 890D[470D0000]                   mov [cpu_brand + 0x28],ecx
+   558 000001C4 8915[4B0D0000]                   mov [cpu_brand + 0x2c],edx
+   559                                  
+   560 000001CA BB[1A0D0000]                     mov ebx,cpu_brnd0
+   561 000001CF 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   562 000001D6 BB[1F0D0000]                     mov ebx,cpu_brand
+   563 000001DB 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   564 000001E2 BB[530D0000]                     mov ebx,cpu_brnd1
+   565 000001E7 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   566                                  
+   567 000001EE BB[B2040000]                     mov ebx,message_5
+   568 000001F3 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   569 000001FA BE32000000                       mov esi,50                          ;用户程序位于逻辑50扇区 
+   570 000001FF E8FCFDFFFF                       call load_relocate_program
+   571                                        
+   572 00000204 BB[CC040000]                     mov ebx,do_status
+   573 00000209 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   574                                        
+   575 00000210 8925[160D0000]                   mov [esp_pointer],esp               ;临时保存堆栈指针
+   576                                         
+   577 00000216 8ED8                             mov ds,ax
+   578                                        
+   579 00000218 FF2D10000000                     jmp far [0x10]                      ;控制权交给用户程序（入口点）
+   580                                                                               ;堆栈可能切换 
+   581                                  
+   582                                  return_point:                                ;用户程序返回点
+   583 0000021E B830000000                       mov eax,core_data_seg_sel           ;使ds指向核心数据段
+   584 00000223 8ED8                             mov ds,eax
+   585                                  
+   586 00000225 B818000000                       mov eax,core_stack_seg_sel          ;切换回内核自己的堆栈
+   587 0000022A 8ED0                             mov ss,eax 
+   588 0000022C 8B25[160D0000]                   mov esp,[esp_pointer]
+   589                                  
+   590 00000232 BB[D4040000]                     mov ebx,message_6
+   591 00000237 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   592                                  
+   593                                           ;这里可以放置清除用户程序各种描述符的指令
+   594                                           ;也可以加载并启动其它程序
+   595                                         
+   596 0000023E F4                               hlt
+   597                                              
+   598                                  ;===============================================================================
+   599                                  SECTION core_trail
+   600                                  ;-------------------------------------------------------------------------------
+   601                                  core_end:
