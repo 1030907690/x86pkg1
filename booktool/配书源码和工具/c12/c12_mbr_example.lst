@@ -158,10 +158,10 @@
    153 00000189 31DB                                    xor ebx,ebx
    154 0000018B B908000000                              mov ecx,8
    155 00000190 BE10000000                              mov esi,16
-   156                                          digit:  
+   156                                          digit:                 ; digit 和 show有对应关系 ，digit算出十六进制  ，show根据内存地址显示
    157 00000195 31D2                                    xor edx,edx
    158 00000197 F7F6                                    div esi
-   159 00000199 8893[CA010000]                          mov [mem+ebx],dl ; 这个好像在在转成十六进制
+   159 00000199 8893[CA010000]                          mov [mem+ebx],dl ; 得到余数，这个好像是在转成十六进制
    160 0000019F 43                                      inc ebx
    161 000001A0 E2F3                                    loop digit
    162                                                  
@@ -171,7 +171,7 @@
    166 000001A6 BE07000000                              mov esi,7
    167                                          show:   
    168 000001AB 8A86[CA010000]                          mov al,[mem+esi]
-   169 000001B1 88C3                                    mov bl,al
+   169 000001B1 88C3                                    mov bl,al          ; bl   下面ebx的低8位
    170 000001B3 8A83[D2010000]                          mov al,[number+ebx]
    171 000001B9 2688443D00                              mov [es:ebp+edi],al
    172 000001BE 83C702                                  add edi,2

@@ -153,7 +153,7 @@ check:          push ebx
                 xor ebx,ebx
                 mov ecx,8
                 mov esi,16
-        digit:                 ; digit 和 show有对应关系 ，digit算出十六进制  ，show根据内存地址显示
+        digit:                 ; digit 和 show有对应关系 ，digit算出十六进制  ，show根据内存地址显示 ，（mem的值和number有映射关系）
                 xor edx,edx
                 div esi
                 mov [mem+ebx],dl ; 得到余数，这个好像是在转成十六进制
