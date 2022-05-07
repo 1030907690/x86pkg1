@@ -199,8 +199,8 @@ make_gdt_descriptor:                     ;构造描述符
                                          ;      位置，其它没用到的位置0） 
                                          ;返回：EDX:EAX=完整的描述符
          mov edx,eax
-         shl eax,16                     
-         or ax,bx                        ;描述符前32位(EAX)构造完毕
+         shl eax,16                      ;-- 左移16位，在描述符低32位中，高16位是基地在，低16位是段界限
+         or ax,bx                        ;描述符前32位(EAX)构造完毕 -- 这里的ax代表eax的低16位，bx代表ebx的低16位，此时eax的低16位都是0，使用or指令相当于把bx的值全给ax
       
          and edx,0xffff0000              ;清除基地址中无关的位
          rol edx,8
