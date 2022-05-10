@@ -62,53 +62,53 @@ put_char:                                ;显示一个字符
          in al,dx                        ;低8位 
          mov bx,ax                       ;BX=代表光标位置的16位数
 
-         cmp cl,0x0d                     ;回车符？
+         cmp cl,0x0d                     ;回车符？- 换行表示是当前行的首个光标
          jnz .put_0a                     ;不是。看看是不是换行等字符 
          mov ax,bx                       ;此句略显多余，但去掉后还得改书，麻烦 
-         mov bl,80                       
-         div bl
-         mul bl
+         mov bl,80  ; -- 如果是回车符0x0d，那么，应将光标移动到当前行的行首。
+         div bl    ;--每行有80 个字符，那么，用当前光标位置除以80，余数不要，就可以得到当前行的行号。
+         mul bl      ;--接着，再乘以80，就是当前行行首的光标数值
          mov bx,ax
          jmp .set_cursor
 
  .put_0a:
          cmp cl,0x0a                     ;换行符？
          jnz .put_other                  ;不是，那就正常显示字符 
-         add bx,80
+         add bx,80                       ; -- 如果是，光标往下挪1行，就加80
          jmp .roll_screen
 
  .put_other:                             ;正常显示字符
          mov ax,0xb800
          mov es,ax
-         shl bx,1
-         mov [es:bx],cl
+         shl bx,1         ; -- 二进制左移1位相当于*2 ,bx作为偏移地址
+         mov [es:bx],cl   ; -- mov [es:bx],cl 等同于 mov es:[bx],cl 
 
          ;以下将光标位置推进一个字符
-         shr bx,1
-         add bx,1
+         shr bx,1        ; -- 二进制右移1位相当于除以2 ，bx作为偏移地址
+         add bx,1        ;+1 恢复光标位置
 
- .roll_screen:
+ .roll_screen:  ; --  滚屏实质上就是将屏幕上第2～25 行的内容整体往上提 一行，最后用黑底白字的空白字符填充第25行
          cmp bx,2000                     ;光标超出屏幕？滚屏
          jl .set_cursor
 
          mov ax,0xb800
          mov ds,ax
          mov es,ax
-         cld
-         mov si,0xa0
-         mov di,0x00
-         mov cx,1920
+         cld             ;-- cld 表示正向复制
+         mov si,0xa0    ;--屏幕第2 行 第1 列的位置 ，从这个位置开始
+         mov di,0x00    ; -- 屏幕第1 行 第1 列的位置 ，复制数据的目标区域从这个位置开始
+         mov cx,1920   ; -- 要传输的字节
          rep movsw
          mov bx,3840                     ;清除屏幕最底一行
          mov cx,80
  .cls:
-         mov word[es:bx],0x0720
+         mov word[es:bx],0x0720  ; -- 使用黑底白字的空白字符循环写入这一行
          add bx,2
          loop .cls
 
          mov bx,1920
 
- .set_cursor:
+ .set_cursor:    ;-- 将寄存器BX中的高8位和低8 位通过数据段口0x3d5 写入它们，然后恢复寄存器，最后返回
          mov dx,0x3d4
          mov al,0x0e
          out dx,al
@@ -133,8 +133,8 @@ put_char:                                ;显示一个字符
 
 ;-------------------------------------------------------------------------------
   start:
-         ;初始执行时，DS和ES指向用户程序头部段
-         mov ax,[stack_segment]           ;设置到用户程序自己的堆栈 
+         ;初始执行时，DS和ES指向用户程序头部段  -- 进入用户程序后，初始化用户程序自己的栈段、数据段
+         mov ax,ds:[stack_segment]           ;设置到用户程序自己的堆栈 
          mov ss,ax
          mov sp,stack_end
          
@@ -148,7 +148,7 @@ put_char:                                ;显示一个字符
          mov ax,begin
          push ax                          ;可以直接push begin,80386+
          
-         retf                             ;转移到代码段2执行 
+         retf                             ;转移到代码段2执行  -- 使用retf模拟调用其他代码段
          
   continue:
          mov ax,[es:data_2_segment]       ;段寄存器DS切换到数据段2 
@@ -171,7 +171,7 @@ SECTION code_2 align=16 vstart=0          ;定义代码段2（16字节对齐）
          
 ;===============================================================================
 SECTION data_1 align=16 vstart=0
-
+      ; -- 0x0d 是回车	  0x0a是换行
     msg0 db '  This is NASM - the famous Netwide Assembler. '
          db 'Back at SourceForge and in intensive development! '
          db 'Get the current versions from http://www.nasm.us/.'
@@ -200,7 +200,7 @@ SECTION data_2 align=16 vstart=0
 ;===============================================================================
 SECTION stack align=16 vstart=0
            
-         resb 256
+         resb 256 ;-- 伪指令resb（REServe Byte）的意思是从当前位置开始，保留指定 数量的字节，但不初始化它们的值
 
 stack_end:  
 
