@@ -12,7 +12,7 @@ SECTION header vstart=0                     ;定义用户程序头部段
                     dd section.code_1.start ;段地址[0x06] 
     
     realloc_tbl_len dw (header_end-code_1_segment)/4
-                                            ;段重定位表项个数[0x0a]
+                                            ;段重定位表项个数[0x0a] -- 计算有多少个段重定位表项 ，因为每个表项是4个字节， (结束-开始) / 4 = 有多少个段重定位表
     
     ;段重定位表           
     code_1_segment  dd section.code_1.start ;[0x0c]
