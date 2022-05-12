@@ -110,7 +110,7 @@
    110 0000006F BEA0000000                       mov esi,0xa0                       ;小心！32位模式下movsb/w/d 
    111 00000074 BF00000000                       mov edi,0x00                       ;使用的是esi/edi/ecx 
    112 00000079 B980070000                       mov ecx,1920
-   113 0000007E F3A5                             rep movsd
+   113 0000007E F3A5                             rep movsd                          ;-- 复制双字(4个字节)
    114 00000080 66BB000F                         mov bx,3840                        ;清除屏幕最底一行
    115 00000084 B950000000                       mov ecx,80                         ;32位程序应该使用ECX
    116                                    .cls:
@@ -247,10 +247,10 @@
    247 00000133 8B0D[06000000]                   mov ecx,[ram_alloc]                ;返回分配的起始地址
    248                                  
    249 00000139 89C3                             mov ebx,eax
-   250 0000013B 83E3FC                           and ebx,0xfffffffc
-   251 0000013E 83C304                           add ebx,4                          ;强制对齐 
-   252 00000141 A903000000                       test eax,0x00000003                ;下次分配的起始地址最好是4字节对齐
-   253 00000146 0F45C3                           cmovnz eax,ebx                     ;如果没有对齐，则强制对齐 
+   250 0000013B 83E3FC                           and ebx,0xfffffffc                 ; -- 最后2位清零
+   251 0000013E 83C304                           add ebx,4                          ;强制对齐 -- 强制EBX中的地址对齐在下一个4字节边界
+   252 00000141 A903000000                       test eax,0x00000003                ;下次分配的起始地址最好是4字节对齐 -- 0x00000003二进制0011
+   253 00000146 0F45C3                           cmovnz eax,ebx                     ;如果没有对齐，则强制对齐  -- 如果eax最后2位包含1，表示没有4字节对齐，test指令执行后不为0，这里使用ebx赋值给eax ；否则使用原值eax
    254 00000149 A3[06000000]                     mov [ram_alloc],eax                ;下次从该地址分配内存
    255                                                                              ;cmovcc指令可以避免控制转移 
    256 0000014E 5B                               pop ebx
@@ -273,28 +273,28 @@
    273 00000157 BB30000000                       mov ebx,core_data_seg_sel          ;切换到核心数据段
    274 0000015C 8EDB                             mov ds,ebx
    275                                  
-   276 0000015E 0F0105[00000000]                 sgdt [pgdt]                        ;以便开始处理GDT
+   276 0000015E 0F0105[00000000]                 sgdt [pgdt]                        ;以便开始处理GDT -- 取得GDT的基地址和大小
    277                                  
    278 00000165 BB08000000                       mov ebx,mem_0_4_gb_seg_sel
-   279 0000016A 8EC3                             mov es,ebx
-   280                                  
-   281 0000016C 0FB71D[00000000]                 movzx ebx,word [pgdt]              ;GDT界限 
+   279 0000016A 8EC3                             mov es,ebx                          ; -- 使段寄存器ES 指向4GB内存段以操作全局描述符表（GDT）
+   280                                  		 ; 计算描述符的安装地址
+   281 0000016C 0FB71D[00000000]                 movzx ebx,word [pgdt]              ;GDT界限  -- MOVZX指令将源操作数的内容复制到目的操作数中，并将该值零扩展至16位或32位。该指令仅适用于无符号整数
    282 00000173 6643                             inc bx                             ;GDT总字节数，也是下一个描述符偏移 
-   283 00000175 031D[02000000]                   add ebx,[pgdt+2]                   ;下一个描述符的线性地址 
-   284                                        
+   283 00000175 031D[02000000]                   add ebx,[pgdt+2]                   ;下一个描述符的线性地址 -- 用GDT 的线性地址加上这个偏移量，就是用于安装新描述符的线性地址
+   284                                           ; -- 把新的描述符写入4G内存段
    285 0000017B 268903                           mov [es:ebx],eax
    286 0000017E 26895304                         mov [es:ebx+4],edx
    287                                        
-   288 00000182 668305[00000000]08               add word [pgdt],8                  ;增加一个描述符的大小   
+   288 00000182 668305[00000000]08               add word [pgdt],8                  ;增加一个描述符的大小   -- 因为新增了1个描述符，所以将GDT的界限值加上8
    289                                        
-   290 0000018A 0F0115[00000000]                 lgdt [pgdt]                        ;对GDT的更改生效 
+   290 0000018A 0F0115[00000000]                 lgdt [pgdt]                        ;对GDT的更改生效 -- 重新加载gdtr
    291                                         
    292 00000191 66A1[00000000]                   mov ax,[pgdt]                      ;得到GDT界限值
    293 00000197 6631D2                           xor dx,dx
    294 0000019A 66BB0800                         mov bx,8
    295 0000019E 66F7F3                           div bx                             ;除以8，去掉余数
-   296 000001A1 6689C1                           mov cx,ax                          
-   297 000001A4 66C1E103                         shl cx,3                           ;将索引号移到正确位置 
+   296 000001A1 6689C1                           mov cx,ax                          ; -- ax就是最后一个描述符索引号
+   297 000001A4 66C1E103                         shl cx,3                           ;将索引号移到正确位置 -- 左移3位 ,即最后3位 TI = 0 RPL =00，最后形成完整的段选择子
    298                                  
    299 000001A8 07                               pop es
    300 000001A9 1F                               pop ds
@@ -361,7 +361,7 @@
    356 0000041C [1E020000]                                        dd  return_point
    357 00000420 3800                                              dw  core_code_seg_sel
    358                                  
-   359                                           salt_item_len   equ $-salt_4
+   359                                           salt_item_len   equ $-salt_4                              ; -- 单个符号名的长度
    360                                           salt_items      equ ($-salt)/salt_item_len
    361                                  
    362 00000422 2020496620796F7520-              message_1        db  '  If you seen this message,that means we '
@@ -432,10 +432,10 @@
    406                                           ;以下判断整个程序有多大
    407 0000001C A1[16050000]                     mov eax,[core_buf]                 ;程序尺寸
    408 00000021 89C3                             mov ebx,eax
-   409 00000023 81E300FEFFFF                     and ebx,0xfffffe00                 ;使之512字节对齐（能被512整除的数， 
-   410 00000029 81C300020000                     add ebx,512                        ;低9位都为0 
-   411 0000002F A9FF010000                       test eax,0x000001ff                ;程序的大小正好是512的倍数吗? 
-   412 00000034 0F45C3                           cmovnz eax,ebx                     ;不是。使用凑整的结果 
+   409 00000023 81E300FEFFFF                     and ebx,0xfffffe00                 ;使之512字节对齐（能被512整除的数，  -- 0xfffffe00二进制11111111111111111111111000000000，低9位都为0
+   410 00000029 81C300020000                     add ebx,512                        ;低9位都为0 -- 这是低9位都为0，加上512，等于是将那些零头凑整
+   411 0000002F A9FF010000                       test eax,0x000001ff                ;程序的大小正好是512的倍数吗?  -- 0x000001ff二进制000111111111 ，若人家原本就是512 的整数倍，前面这么做无疑是多加了一个扇区， test与and类似只是不会改变操作数的值
+   412 00000034 0F45C3                           cmovnz eax,ebx                     ;不是。使用凑整的结果  -- 不为0则传送，表示低9位有为1的，不能被512整除，所以使用凑整的结果
    413                                        
    414 00000037 89C1                             mov ecx,eax                        ;实际需要申请的内存数量
    415 00000039 9A[22010000]2800                 call sys_routine_seg_sel:allocate_memory
@@ -493,7 +493,7 @@
    467 000000CE F7670C                           mul dword [edi+0x0c]                         
    468 000000D1 89C1                             mov ecx,eax                        ;准备为堆栈分配内存 
    469 000000D3 9A[22010000]2800                 call sys_routine_seg_sel:allocate_memory
-   470 000000DA 01C8                             add eax,ecx                        ;得到堆栈的高端物理地址 
+   470 000000DA 01C8                             add eax,ecx                        ;得到堆栈的高端物理地址  -- 用allocate_memory 返回的低端地址，加上栈的大小，得到栈空间的高端地址
    471 000000DC B90096C000                       mov ecx,0x00c09600                 ;4KB粒度的堆栈段描述符
    472 000000E1 9A[AE010000]2800                 call sys_routine_seg_sel:make_seg_descriptor
    473 000000E8 9A[52010000]2800                 call sys_routine_seg_sel:set_up_gdt_descriptor
@@ -503,9 +503,9 @@
    477 000000F3 8B4704                           mov eax,[edi+0x04]
    478 000000F6 8EC0                             mov es,eax                         ;es -> 用户程序头部 
    479 000000F8 B830000000                       mov eax,core_data_seg_sel
-   480 000000FD 8ED8                             mov ds,eax
+   480 000000FD 8ED8                             mov ds,eax                         ;-- ds  -> 内核数据段
    481                                        
-   482 000000FF FC                               cld
+   482 000000FF FC                               cld                                ; -- 正向比较
    483                                  
    484 00000100 268B0D24000000                   mov ecx,[es:0x24]                  ;用户程序的SALT条目数
    485 00000107 BF28000000                       mov edi,0x28                       ;用户程序内的SALT位于头部内0x2c处
@@ -513,18 +513,18 @@
    487 0000010C 51                               push ecx
    488 0000010D 57                               push edi
    489                                        
-   490 0000010E B904000000                       mov ecx,salt_items
+   490 0000010E B904000000                       mov ecx,salt_items              ; -- 内循环的循环次数，内核中声明的符号名数量
    491 00000113 BE[0A000000]                     mov esi,salt
    492                                    .b3:
    493 00000118 57                               push edi
    494 00000119 56                               push esi
    495 0000011A 51                               push ecx
    496                                  
-   497 0000011B B940000000                       mov ecx,64                         ;检索表中，每条目的比较次数 
-   498 00000120 F3A7                             repe cmpsd                         ;每次比较4字节 
-   499 00000122 7515                             jnz .b4
+   497 0000011B B940000000                       mov ecx,64                         ;检索表中，每条目的比较次数 -- 符号名部分是256 字节 每次用cmpsd 指令比较4字节，故每个条目至多需要比对64 次
+   498 00000120 F3A7                             repe cmpsd                         ;每次比较4字节  -- 如果两个字符串相同，则需要连续比对64 次，而且，在比对结束 时，ZF＝1，表示最后4字节也相同
+   499 00000122 7515                             jnz .b4                            ; -- 如果ZF=0,表示两个字符串不相等，跳转到.b4
    500 00000124 8B06                             mov eax,[esi]                      ;若匹配，esi恰好指向其后的地址数据
-   501 00000126 26898700FFFFFF                   mov [es:edi-256],eax               ;将字符串改写成偏移地址 
+   501 00000126 26898700FFFFFF                   mov [es:edi-256],eax               ;将字符串改写成偏移地址 -- 把用户程序里的字符串改成偏移地址
    502 0000012D 668B4604                         mov ax,[esi+4]
    503 00000131 2666898704FFFFFF                 mov [es:edi-252],ax                ;以及段选择子 
    504                                    .b4:
@@ -559,10 +559,10 @@
    533 00000162 8ED9                             mov ds,ecx
    534                                  
    535 00000164 BB[22040000]                     mov ebx,message_1
-   536 00000169 9A[00000000]2800                 call sys_routine_seg_sel:put_string
+   536 00000169 9A[00000000]2800                 call sys_routine_seg_sel:put_string  ; --该call指令属于直接远转移,指令中给出了公共例程段的选择子和段内偏移量
    537                                                                           
    538                                           ;显示处理器品牌信息 
-   539 00000170 B802000080                       mov eax,0x80000002
+   539 00000170 B802000080                       mov eax,0x80000002        ; -- EAX 用于指定要返回什么样的信息，也就是功能
    540 00000175 0FA2                             cpuid
    541 00000177 A3[1F0D0000]                     mov [cpu_brand + 0x00],eax
    542 0000017C 891D[230D0000]                   mov [cpu_brand + 0x04],ebx
@@ -593,7 +593,7 @@
    567 000001EE BB[B2040000]                     mov ebx,message_5
    568 000001F3 9A[00000000]2800                 call sys_routine_seg_sel:put_string
    569 000001FA BE32000000                       mov esi,50                          ;用户程序位于逻辑50扇区 
-   570 000001FF E8FCFDFFFF                       call load_relocate_program
+   570 000001FF E8FCFDFFFF                       call load_relocate_program         ; -- 加载并重定位用户程序
    571                                        
    572 00000204 BB[CC040000]                     mov ebx,do_status
    573 00000209 9A[00000000]2800                 call sys_routine_seg_sel:put_string

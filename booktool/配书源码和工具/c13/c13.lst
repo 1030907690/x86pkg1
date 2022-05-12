@@ -23,12 +23,12 @@
     23                                               
     24                                  ;-------------------------------------------------------------------------------
     25                                           ;符号地址检索表
-    26 00000024 03000000                         salt_items       dd (header_end-salt)/256 ;#0x24
+    26 00000024 03000000                         salt_items       dd (header_end-salt)/256 ;#0x24  -- 计算符号名数量
     27                                           
     28                                           salt:                                     ;#0x28
     29 00000028 405072696E74537472-              PrintString      db  '@PrintString'
     29 00000031 696E67             
-    30 00000034 00<rep F4h>                                  times 256-($-PrintString) db 0
+    30 00000034 00<rep F4h>                                  times 256-($-PrintString) db 0  ; -- 要求每个符号名长度是256字节，不足用0填充
     31                                                       
     32 00000128 405465726D696E6174-              TerminateProgram db  '@TerminateProgram'
     32 00000131 6550726F6772616D   

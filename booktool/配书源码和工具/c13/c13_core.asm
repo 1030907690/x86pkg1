@@ -110,7 +110,7 @@ put_char:                                   ;在当前光标处显示一个字符,并推进
          mov esi,0xa0                       ;小心！32位模式下movsb/w/d 
          mov edi,0x00                       ;使用的是esi/edi/ecx 
          mov ecx,1920
-         rep movsd
+         rep movsd                          ;-- 复制双字(4个字节)
          mov bx,3840                        ;清除屏幕最底一行
          mov ecx,80                         ;32位程序应该使用ECX
   .cls:
@@ -247,10 +247,10 @@ allocate_memory:                            ;分配内存
          mov ecx,[ram_alloc]                ;返回分配的起始地址
 
          mov ebx,eax
-         and ebx,0xfffffffc
-         add ebx,4                          ;强制对齐 
-         test eax,0x00000003                ;下次分配的起始地址最好是4字节对齐
-         cmovnz eax,ebx                     ;如果没有对齐，则强制对齐 
+         and ebx,0xfffffffc                 ; -- 最后2位清零
+         add ebx,4                          ;强制对齐 -- 强制EBX中的地址对齐在下一个4字节边界
+         test eax,0x00000003                ;下次分配的起始地址最好是4字节对齐 -- 0x00000003二进制0011
+         cmovnz eax,ebx                     ;如果没有对齐，则强制对齐  -- 如果eax最后2位包含1，表示没有4字节对齐，test指令执行后不为0，这里使用ebx赋值给eax ；否则使用原值eax
          mov [ram_alloc],eax                ;下次从该地址分配内存
                                             ;cmovcc指令可以避免控制转移 
          pop ebx
@@ -273,28 +273,28 @@ set_up_gdt_descriptor:                      ;在GDT内安装一个新的描述符
          mov ebx,core_data_seg_sel          ;切换到核心数据段
          mov ds,ebx
 
-         sgdt [pgdt]                        ;以便开始处理GDT
+         sgdt [pgdt]                        ;以便开始处理GDT -- 取得GDT的基地址和大小
 
          mov ebx,mem_0_4_gb_seg_sel
-         mov es,ebx
-
-         movzx ebx,word [pgdt]              ;GDT界限 
+         mov es,ebx                          ; -- 使段寄存器ES 指向4GB内存段以操作全局描述符表（GDT）
+		 ; 计算描述符的安装地址
+         movzx ebx,word [pgdt]              ;GDT界限  -- MOVZX指令将源操作数的内容复制到目的操作数中，并将该值零扩展至16位或32位。该指令仅适用于无符号整数
          inc bx                             ;GDT总字节数，也是下一个描述符偏移 
-         add ebx,[pgdt+2]                   ;下一个描述符的线性地址 
-      
+         add ebx,[pgdt+2]                   ;下一个描述符的线性地址 -- 用GDT 的线性地址加上这个偏移量，就是用于安装新描述符的线性地址
+         ; -- 把新的描述符写入4G内存段
          mov [es:ebx],eax
          mov [es:ebx+4],edx
       
-         add word [pgdt],8                  ;增加一个描述符的大小   
+         add word [pgdt],8                  ;增加一个描述符的大小   -- 因为新增了1个描述符，所以将GDT的界限值加上8
       
-         lgdt [pgdt]                        ;对GDT的更改生效 
+         lgdt [pgdt]                        ;对GDT的更改生效 -- 重新加载gdtr
        
          mov ax,[pgdt]                      ;得到GDT界限值
          xor dx,dx
          mov bx,8
          div bx                             ;除以8，去掉余数
-         mov cx,ax                          
-         shl cx,3                           ;将索引号移到正确位置 
+         mov cx,ax                          ; -- ax就是最后一个描述符索引号
+         shl cx,3                           ;将索引号移到正确位置 -- 左移3位 ,即最后3位 TI = 0 RPL =00，最后形成完整的段选择子
 
          pop es
          pop ds
@@ -356,7 +356,7 @@ SECTION core_data vstart=0                  ;系统核心的数据段
                           dd  return_point
                           dw  core_code_seg_sel
 
-         salt_item_len   equ $-salt_4
+         salt_item_len   equ $-salt_4                              ; -- 单个符号名的长度
          salt_items      equ ($-salt)/salt_item_len
 
          message_1        db  '  If you seen this message,that means we '
@@ -406,10 +406,10 @@ load_relocate_program:                      ;加载并重定位用户程序
          ;以下判断整个程序有多大
          mov eax,[core_buf]                 ;程序尺寸
          mov ebx,eax
-         and ebx,0xfffffe00                 ;使之512字节对齐（能被512整除的数， 
-         add ebx,512                        ;低9位都为0 
-         test eax,0x000001ff                ;程序的大小正好是512的倍数吗? 
-         cmovnz eax,ebx                     ;不是。使用凑整的结果 
+         and ebx,0xfffffe00                 ;使之512字节对齐（能被512整除的数，  -- 0xfffffe00二进制11111111111111111111111000000000，低9位都为0
+         add ebx,512                        ;低9位都为0 -- 这是低9位都为0，加上512，等于是将那些零头凑整
+         test eax,0x000001ff                ;程序的大小正好是512的倍数吗?  -- 0x000001ff二进制000111111111 ，若人家原本就是512 的整数倍，前面这么做无疑是多加了一个扇区， test与and类似只是不会改变操作数的值
+         cmovnz eax,ebx                     ;不是。使用凑整的结果  -- 不为0则传送，表示低9位有为1的，不能被512整除，所以使用凑整的结果
       
          mov ecx,eax                        ;实际需要申请的内存数量
          call sys_routine_seg_sel:allocate_memory
@@ -467,7 +467,7 @@ load_relocate_program:                      ;加载并重定位用户程序
          mul dword [edi+0x0c]                         
          mov ecx,eax                        ;准备为堆栈分配内存 
          call sys_routine_seg_sel:allocate_memory
-         add eax,ecx                        ;得到堆栈的高端物理地址 
+         add eax,ecx                        ;得到堆栈的高端物理地址  -- 用allocate_memory 返回的低端地址，加上栈的大小，得到栈空间的高端地址
          mov ecx,0x00c09600                 ;4KB粒度的堆栈段描述符
          call sys_routine_seg_sel:make_seg_descriptor
          call sys_routine_seg_sel:set_up_gdt_descriptor
@@ -477,9 +477,9 @@ load_relocate_program:                      ;加载并重定位用户程序
          mov eax,[edi+0x04]
          mov es,eax                         ;es -> 用户程序头部 
          mov eax,core_data_seg_sel
-         mov ds,eax
+         mov ds,eax                         ;-- ds  -> 内核数据段
       
-         cld
+         cld                                ; -- 正向比较
 
          mov ecx,[es:0x24]                  ;用户程序的SALT条目数
          mov edi,0x28                       ;用户程序内的SALT位于头部内0x2c处
@@ -487,18 +487,18 @@ load_relocate_program:                      ;加载并重定位用户程序
          push ecx
          push edi
       
-         mov ecx,salt_items
+         mov ecx,salt_items              ; -- 内循环的循环次数，内核中声明的符号名数量
          mov esi,salt
   .b3:
          push edi
          push esi
          push ecx
 
-         mov ecx,64                         ;检索表中，每条目的比较次数 
-         repe cmpsd                         ;每次比较4字节 
-         jnz .b4
+         mov ecx,64                         ;检索表中，每条目的比较次数 -- 符号名部分是256 字节 每次用cmpsd 指令比较4字节，故每个条目至多需要比对64 次
+         repe cmpsd                         ;每次比较4字节  -- 如果两个字符串相同，则需要连续比对64 次，而且，在比对结束 时，ZF＝1，表示最后4字节也相同
+         jnz .b4                            ; -- 如果ZF=0,表示两个字符串不相等，跳转到.b4
          mov eax,[esi]                      ;若匹配，esi恰好指向其后的地址数据
-         mov [es:edi-256],eax               ;将字符串改写成偏移地址 
+         mov [es:edi-256],eax               ;将字符串改写成偏移地址 -- 把用户程序里的字符串改成偏移地址
          mov ax,[esi+4]
          mov [es:edi-252],ax                ;以及段选择子 
   .b4:
@@ -533,10 +533,10 @@ start:
          mov ds,ecx
 
          mov ebx,message_1
-         call sys_routine_seg_sel:put_string
+         call sys_routine_seg_sel:put_string  ; --该call指令属于直接远转移,指令中给出了公共例程段的选择子和段内偏移量
                                          
          ;显示处理器品牌信息 
-         mov eax,0x80000002
+         mov eax,0x80000002        ; -- EAX 用于指定要返回什么样的信息，也就是功能
          cpuid
          mov [cpu_brand + 0x00],eax
          mov [cpu_brand + 0x04],ebx
@@ -567,7 +567,7 @@ start:
          mov ebx,message_5
          call sys_routine_seg_sel:put_string
          mov esi,50                          ;用户程序位于逻辑50扇区 
-         call load_relocate_program
+         call load_relocate_program         ; -- 加载并重定位用户程序
       
          mov ebx,do_status
          call sys_routine_seg_sel:put_string

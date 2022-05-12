@@ -23,11 +23,11 @@ SECTION header vstart=0
              
 ;-------------------------------------------------------------------------------
          ;符号地址检索表
-         salt_items       dd (header_end-salt)/256 ;#0x24
+         salt_items       dd (header_end-salt)/256 ;#0x24  -- 计算符号名数量
          
          salt:                                     ;#0x28
          PrintString      db  '@PrintString'
-                     times 256-($-PrintString) db 0
+                     times 256-($-PrintString) db 0  ; -- 要求每个符号名长度是256字节，不足用0填充
                      
          TerminateProgram db  '@TerminateProgram'
                      times 256-($-TerminateProgram) db 0
