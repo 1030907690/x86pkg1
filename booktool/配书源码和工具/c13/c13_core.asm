@@ -212,7 +212,7 @@ put_hex_dword:                              ;在当前光标处以十六进制形式显示
          mov ebx,bin_hex                    ;指向核心数据段内的转换表
          mov ecx,8
   .xlt:    
-         rol edx,4
+         rol edx,4                       ; -- rol 循环左移，把前面的位依次移动到后面
          mov eax,edx
          and eax,0x0000000f
          xlat
